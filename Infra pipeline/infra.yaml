@@ -1,0 +1,92 @@
+trigger: none
+
+pool: Default
+
+stages:
+# ------------------------------------------------
+# 1. Terraform Init + Plan + tfsec
+# ------------------------------------------------
+- stage: Terraform_Init_Plan
+  displayName: "Terraform Init + Plan"
+  jobs:
+    - job: InitPlan
+      displayName: "Terraform Init + Plan"
+      steps:
+        - task: TerraformInstaller@1
+          displayName: "Install Terraform"
+          inputs:
+            terraformVersion: 'latest'
+
+        - task: TerraformTask@5
+          displayName: "Terraform Init"
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: '$(System.DefaultWorkingDirectory)/MicroService-Infra/1.module/Dev/'
+            backendServiceArm: 'ado to azure'
+            backendAzureRmResourceGroupName: 'CitiusTech-rg'
+            backendAzureRmStorageAccountName: 'infrastatefile'
+            backendAzureRmContainerName: 'tfstate'
+            backendAzureRmKey: 'Dev.terraform.tfstate'
+
+        - task: TerraformTask@5
+          displayName: "Terraform Plan"
+          inputs:
+            provider: 'azurerm'
+            command: 'plan'
+            workingDirectory: '$(System.DefaultWorkingDirectory)/MicroService-Infra/1.module/Dev/'
+            environmentServiceNameAzureRM: 'ado to azure'
+
+        - task: tfsec@1
+          displayName: "Security Scan (tfsec)"
+          inputs:
+            version: 'v1.26.0'
+            dir: '$(System.DefaultWorkingDirectory)/MicroService-Infra/1.module/Dev/'
+
+# ------------------------------------------------
+# 2. Manual Approval
+# ------------------------------------------------
+- stage: Manual_Validation
+  displayName: "Manual Validation"
+  dependsOn: Terraform_Init_Plan
+  jobs:
+    - job: ManualApproval
+      displayName: "Manual Approval Required"
+      steps:
+        - task: ManualValidation@1
+          inputs:
+            approvers: 'anuragsom555@gmail.com'
+            instructions: 'Please verify Terraform plan & code before approval.'
+            onTimeout: 'resume'
+
+# ------------------------------------------------
+# 3. Terraform Apply
+# ------------------------------------------------
+- stage: Terraform_Apply
+  displayName: "Terraform Apply"
+  dependsOn: Manual_Validation
+  condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+  jobs:
+    - job: ApplyJob
+      displayName: "Terraform Apply"
+      steps:
+        - task: TerraformTask@5
+          displayName: "Terraform Init"
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            workingDirectory: '$(System.DefaultWorkingDirectory)/MicroService-Infra/1.module/Dev/'
+            backendServiceArm: 'ado to azure'
+            backendAzureRmResourceGroupName: 'CitiusTech-rg'
+            backendAzureRmStorageAccountName: 'infrastatefile'
+            backendAzureRmContainerName: 'tfstate'
+            backendAzureRmKey: 'Dev.terraform.tfstate'
+
+        - task: TerraformTask@5
+          displayName: "Terraform Apply"
+          inputs:
+            provider: 'azurerm'
+            command: 'apply'
+            workingDirectory: '$(System.DefaultWorkingDirectory)/MicroService-Infra/1.module/Dev/'
+            commandOptions: '-auto-approve'
+            environmentServiceNameAzureRM: 'ado to azure'
